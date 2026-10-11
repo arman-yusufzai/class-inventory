@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stockroom - Inventory</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #eef1ec; --card: #fbfcfa; --ink: #14302d; --muted: #5b6f6a;
+    --line: #c9d1c8; --tag: #f0b323; --alert: #c8452d; --ok: #2f7d5b;
+    font-family: "Bricolage Grotesque", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); line-height: 1.5; }
+  header { padding: 28px 24px 8px; max-width: 1100px; margin: 0 auto; }
+  h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.2rem); font-weight: 800; letter-spacing: -0.03em; }
+  header p { margin: 4px 0 0; color: var(--muted); }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 24px 48px; display: grid; gap: 24px; grid-template-columns: 300px 1fr; align-items: start; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+
+  .stats { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 12px 40px; padding: 12px 0 16px; border-bottom: 2px solid var(--ink); }
+  .stat b { display: block; font-size: 1.7rem; font-weight: 800; line-height: 1.1; }
+  .stat span { color: var(--muted); font-size: .9rem; }
+  .stat.warn b { color: var(--alert); }
+
+  form { background: var(--card); border: 1px solid var(--line); border-top: 8px solid var(--tag); padding: 18px; position: sticky; top: 16px; }
+  form h2 { margin: 0 0 12px; font-size: 1.15rem; }
+  label { display: block; font-size: .85rem; font-weight: 600; margin-top: 10px; }
+  input { width: 100%; padding: 8px 10px; margin-top: 3px; font: inherit; border: 1px solid var(--line); background: #fff; color: var(--ink); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--ink); background: var(--ink); color: #fff; padding: 8px 14px; font-weight: 600; }
+  button.ghost { background: transparent; color: var(--ink); }
+  button.small { padding: 2px 9px; }
+  button:focus-visible, input:focus-visible { outline: 3px solid var(--tag); outline-offset: 1px; }
+  .actions { display: flex; gap: 8px; margin-top: 16px; }
+  #msg { min-height: 1.3em; margin: 10px 0 0; font-size: .9rem; color: var(--alert); }
+
+  .search { width: 100%; margin: 0 0 12px; padding: 10px 12px; }
+  .table-wrap { background: var(--card); border: 1px solid var(--line); overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 560px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: .85rem; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.low td:first-child { box-shadow: inset 5px 0 0 var(--alert); }
+  .qty { display: inline-flex; align-items: center; gap: 8px; }
+  .badge { font-size: .75rem; font-weight: 600; padding: 1px 8px; background: var(--alert); color: #fff; margin-left: 6px; }
+  .cat { color: var(--muted); }
+  .empty { padding: 36px 16px; text-align: center; color: var(--muted); }
+  .links button { background: none; border: none; color: var(--ink); text-decoration: underline; padding: 0 6px; font-weight: 400; }
+  .links button.del { color: var(--alert); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Stockroom</h1>
+  <p>Track what you have, what it is worth, and what is running low.</p>
+</header>
+
+<main>
+  <section class="stats" id="stats" aria-live="polite"></section>
+
+  <form id="form">
+    <h2 id="formTitle">Add item</h2>
+    <label>Name <input id="name" required></label>
+    <label>Category <input id="category" placeholder="e.g. Stationery"></label>
+    <div class="row">
+      <label>Quantity <input id="quantity" type="number" min="0" value="0" required></label>
+      <label>Price <input id="price" type="number" min="0" step="0.01" value="0" required></label>
+    </div>
+    <label>Warn me when stock is at or below <input id="low" type="number" min="0" value="5"></label>
+    <div class="actions">
+      <button type="submit" id="saveBtn">Add item</button>
+      <button type="button" class="ghost" id="cancelBtn" hidden>Cancel</button>
+    </div>
+    <p id="msg" role="alert"></p>
+  </form>
+
+  <section>
+    <input class="search" id="search" type="search" placeholder="Search by name or category" aria-label="Search items">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Item</th><th>Category</th><th class="num">Price</th><th class="num">In stock</th><th class="num">Value</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty" id="empty" hidden>No items yet. Add your first item using the form.</div>
+    </div>
+  </section>
+</main>
+
+<script>
+  // 1) After deploying the backend on Render, paste its URL here (no trailing slash).
+  const BACKEND_URL = "https://YOUR-APP-NAME.onrender.com";
+
+  // 2) Nothing else to change:
+  //    - opened as a file            -> talks to local Flask  (http://127.0.0.1:5000)
+  //    - served by local Flask       -> same origin
+  //    - hosted on Netlify (or other)-> talks to BACKEND_URL on Render
+  const isLocal = ["localhost", "127.0.0.1"].includes(location.hostname);
+  const API = location.protocol === "file:" ? "http://127.0.0.1:5000" : (isLocal ? "" : BACKEND_URL);
+  const $ = id => document.getElementById(id);
+  let items = [], editingId = null;
+
+  const money = n => "$" + Number(n).toFixed(2);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  async function api(path, method = "GET", body) {
+    const res = await fetch(API + path, {
+      method, headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Something went wrong.");
+    return data;
+  }
+
+  async function load() {
+    try {
+      const data = await api("/api/items?q=" + encodeURIComponent($("search").value));
+      items = data.items;
+      render(data.summary);
+    } catch (e) {
+      $("msg").textContent = isLocal || location.protocol === "file:"
+        ? "Cannot reach the server. Start it with: python backend.py"
+        : "Cannot reach the server. It may be waking up (Render free plan) - wait 30 seconds and reload.";
+    }
+  }
+
+  function render(s) {
+    $("stats").innerHTML = `
+      <div class="stat"><b>${s.total_items}</b><span>Items</span></div>
+      <div class="stat"><b>${s.total_units}</b><span>Units in stock</span></div>
+      <div class="stat"><b>${money(s.total_value)}</b><span>Stock value</span></div>
+      <div class="stat ${s.low_stock ? "warn" : ""}"><b>${s.low_stock}</b><span>Low on stock</span></div>`;
+    $("empty").hidden = items.length > 0;
+    $("rows").innerHTML = items.map(i => `
+      <tr class="${i.is_low ? "low" : ""}">
+        <td>${esc(i.name)}${i.is_low ? '<span class="badge">Low</span>' : ""}</td>
+        <td class="cat">${esc(i.category)}</td>
+        <td class="num">${money(i.price)}</td>
+        <td class="num"><span class="qty">
+          <button class="small ghost" data-act="dec" data-id="${i.id}" aria-label="Remove one ${esc(i.name)}">-</button>
+          ${i.quantity}
+          <button class="small ghost" data-act="inc" data-id="${i.id}" aria-label="Add one ${esc(i.name)}">+</button></span></td>
+        <td class="num">${money(i.quantity * i.price)}</td>
+        <td class="links"><button data-act="edit" data-id="${i.id}">Edit</button><button class="del" data-act="del" data-id="${i.id}">Delete</button></td>
+      </tr>`).join("");
+  }
+
+  $("rows").addEventListener("click", async e => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const id = +btn.dataset.id, item = items.find(i => i.id === id);
+    try {
+      if (btn.dataset.act === "inc") await api("/api/items/" + id, "PUT", { quantity: item.quantity + 1 });
+      if (btn.dataset.act === "dec") await api("/api/items/" + id, "PUT", { quantity: Math.max(0, item.quantity - 1) });
+      if (btn.dataset.act === "del") { if (!confirm(`Delete "${item.name}"?`)) return; await api("/api/items/" + id, "DELETE"); }
+      if (btn.dataset.act === "edit") return startEdit(item);
+      load();
+    } catch (err) { $("msg").textContent = err.message; }
+  });
+
+  function startEdit(i) {
+    editingId = i.id;
+    $("name").value = i.name; $("category").value = i.category; $("quantity").value = i.quantity;
+    $("price").value = i.price; $("low").value = i.low_stock_at;
+    $("formTitle").textContent = "Edit item"; $("saveBtn").textContent = "Save changes";
+    $("cancelBtn").hidden = false; $("name").focus();
+  }
+
+  function resetForm() {
+    editingId = null; $("form").reset();
+    $("formTitle").textContent = "Add item"; $("saveBtn").textContent = "Add item";
+    $("cancelBtn").hidden = true; $("msg").textContent = "";
+  }
+  $("cancelBtn").onclick = resetForm;
+
+  $("form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const body = { name: $("name").value, category: $("category").value, quantity: $("quantity").value, price: $("price").value, low_stock_at: $("low").value };
+    try {
+      if (editingId) await api("/api/items/" + editingId, "PUT", body);
+      else await api("/api/items", "POST", body);
+      resetForm(); load();
+    } catch (err) { $("msg").textContent = err.message; }
+  });
+
+  let t; $("search").addEventListener("input", () => { clearTimeout(t); t = setTimeout(load, 200); });
+  load();
+</script>
+</body>
+</html>

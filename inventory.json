@@ -1,0 +1,10 @@
+[
+  {
+    "id": 2,
+    "name": "Ayaz",
+    "category": "Pencil",
+    "quantity": 1,
+    "price": 10.0,
+    "low_stock_at": 1
+  }
+]
